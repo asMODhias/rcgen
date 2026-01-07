@@ -67,6 +67,23 @@ pub struct KeyPair {
 	pub(crate) serialized_der: Vec<u8>,
 }
 
+// Implement shallow equality and clone based on serialized DER for compatibility with
+// structures that derive `Eq`, `PartialEq`, and `Clone`.
+impl Clone for KeyPair {
+	fn clone(&self) -> Self {
+		// Prefer to parse back from DER; panic if parsing fails so callers notice.
+		KeyPair::try_from(self.serialized_der.clone()).unwrap_or_else(|_| panic!("Cannot clone KeyPair from serialized DER"))
+	}
+}
+
+impl PartialEq for KeyPair {
+	fn eq(&self, other: &Self) -> bool {
+		self.serialized_der == other.serialized_der && (self.alg as *const _) == (other.alg as *const _)
+	}
+}
+
+impl Eq for KeyPair {}
+
 #[cfg(feature = "crypto")]
 impl fmt::Debug for KeyPair {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -139,6 +156,7 @@ impl KeyPair {
 			SignAlgo::Rsa(_sign_alg) => Err(Error::KeyGenerationUnavailable),
 		}
 	}
+
 
 	/// Generates a new random RSA key pair for the specified key size
 	///

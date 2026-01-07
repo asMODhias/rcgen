@@ -11,6 +11,7 @@ use yasna::{DERWriter, DERWriterSeq, Tag};
 use crate::crl::CrlDistributionPoint;
 use crate::csr::CertificateSigningRequest;
 use crate::key_pair::{serialize_public_key_der, sign_der, PublicKeyData};
+use crate::KeyPair;
 #[cfg(feature = "crypto")]
 use crate::ring_like::digest;
 #[cfg(feature = "pem")]
@@ -34,6 +35,17 @@ impl Certificate {
 	/// extract the DER bytes from the return value.
 	pub fn der(&self) -> &CertificateDer<'static> {
 		&self.der
+	}
+
+	/// Compatibility helper: older callers used `Certificate::from_params(params)`.
+	#[cfg(feature = "crypto")]
+	pub fn from_params(mut params: CertificateParams) -> Result<Self, Error> {
+		let der = params
+			.key_pair_der
+			.take()
+			.ok_or(Error::KeyGenerationUnavailable)?;
+		let signing_key = KeyPair::try_from(der).map_err(|_| Error::CouldNotParseKeyPair)?;
+		Ok(params.self_signed(&signing_key)?)
 	}
 
 	/// Get the certificate in PEM encoded format.
@@ -76,6 +88,12 @@ pub struct CertificateParams {
 	///
 	/// Defaults to a truncated SHA-256 digest. See [`KeyIdMethod`] for more information.
 	pub key_identifier_method: KeyIdMethod,
+
+	// Compatibility shims for older rcgen users (optional fields)
+	#[cfg(feature = "crypto")]
+	pub alg: Option<&'static crate::sign_algo::SignatureAlgorithm>,
+	#[cfg(feature = "crypto")]
+	pub key_pair_der: Option<Vec<u8>>,
 }
 
 impl Default for CertificateParams {
@@ -102,6 +120,10 @@ impl Default for CertificateParams {
 			key_identifier_method: KeyIdMethod::Sha256,
 			#[cfg(not(feature = "crypto"))]
 			key_identifier_method: KeyIdMethod::PreSpecified(Vec::new()),
+			#[cfg(feature = "crypto")]
+			alg: None,
+			#[cfg(feature = "crypto")]
+			key_pair_der: None,
 		}
 	}
 }
@@ -336,6 +358,7 @@ impl CertificateParams {
 			custom_extensions,
 			use_authority_key_identifier_extension,
 			key_identifier_method,
+			..
 		} = self;
 		// - subject_key will be used by the caller
 		// - not_before and not_after cannot be put in a CSR
